@@ -1,5 +1,8 @@
+import os
 from eppy.modeleditor import IDF
 from eppy.idf_helpers import getidfobjectlist
+from collections import OrderedDict
+import esoreader as eso
 
 
 class EnergyPlusHelper:
@@ -7,39 +10,42 @@ class EnergyPlusHelper:
     """
 
     def __init__(self,
-                 idf_file,
-                 idd_file=None,
-                 weather_file=None,
+                 idf_path,
+                 idd_path=None,
+                 weather_path=None,
                  output_path=None,
                  ):
         """ New instance of the `EnergyPlusHelper` class
 
         Parameters
         ----------
-        idf_file : string
+        idf_path : string
             the file name with extension (.idf) of the input file to simulate. With a relative path if not in the same
             running directory.
-        idd_file : string
+        idd_path : string
             the Input data dictionary path (.idd)
-        weather_file : string
+        weather_path : string
             the weather file path. (.epw)
         output_path : string
             the directory to output the result files in. Default is the same directory
         Examples
         ----------
         >>> from EPinterface.EPHelper import EnergyPlusHelper
-        >>> ep = EnergyPlusHelper(idf_file="D:/F/uniopt/EP/singleZonePurchAir_template.idf",
-        >>>                         idd_file="D:/F/uniopt/EP/E+.idd",weather_file="D:/F/uniopt/EP/in.epw")
+        >>> ep = EnergyPlusHelper(idf_path="D:/F/uniopt/EP/singleZonePurchAir_template.idf",
+        >>>                         idd_path="D:/F/uniopt/EP/E+.idd",weather_path="D:/F/uniopt/EP/in.epw")
         """
-        self.idf_file = idf_file
-        self.idd_file = idd_file
-        self.weather_file = weather_file
+        self.idf_path = idf_path
+        self.idd_path = idd_path
+        # TODO: handle the weather file path
+        self.weather_path = "/mnt/c/EnergyPlusV9-1-0/WeatherData/USA_CA_San.Francisco.Intl.AP.724940_TMY3.epw"
+        # self.weather_path = "C:/EnergyPlusV9-1-0/WeatherData/USA_CA_San.Francisco.Intl.AP.724940_TMY3.epw"
         self.output_path = output_path
-
-        # IDF.setiddname(idf_file) if self.idf_file else 1
+        self.run_filename = "in.idf"
+        # IDF.setiddname(idd_path) if self.idf_file else 1
         # TODO : get the path of E+ install as the default .idd is needed.
-        IDF.setiddname("D:/F/uniopt/EP/Energy+.idd")
-        self.idf = IDF(self.idf_file, self.weather_file) if self.weather_file else IDF(idf_file)
+        IDF.setiddname("/mnt/d/F/uniopt/EP/Energy+.idd")
+        # IDF.setiddname("D:/F/uniopt/EP/Energy+.idd")
+        self.idf = IDF(self.idf_path, self.weather_path)
 
     def get_all_objects(self):
         """ returns all the idf file objects
@@ -47,10 +53,20 @@ class EnergyPlusHelper:
         Returns
         -------
         Iterable
-            list of idf objects
+            list of idf objects as dictionaries
 
         """
-        return getidfobjectlist(self.idf)
+        objects = []
+        for obj in getidfobjectlist(self.idf):
+            one_obj = list(zip(obj.fieldnames, obj.fieldvalues))
+            # TODO: prior to Python 3.6 Dicts are not ordered and cannot be forced to be-
+            # alt solution :   one_obj = OrderedDict(one_obj)
+            # but we'll need to find a way to dump it into JSON for the ui to be ordered
+            dict_obj = {}
+            for (k, v) in one_obj:
+                dict_obj[k] = v
+            objects.append(dict_obj)
+        return objects
 
     def get_object_fields(self, obj_name):
         """ returns the list of all object fields
@@ -64,7 +80,7 @@ class EnergyPlusHelper:
         -------
         Iterable
             list of the fields of the object.
-            TODO : Handle the return of multiple objects if they have the same name in the UI.
+            TODO : Handle the return of multiple objects, they will have the same name in the UI.
             https://eppy.readthedocs.io/en/latest/Main_Tutorial.html#working-with-e-objects
         """
         objects = self.idf.idfobjects[obj_name]
@@ -91,8 +107,8 @@ class EnergyPlusHelper:
 
 
         """
+        fields = []
         for obj_name, fld_name in zip(obj_name, fld_name):
-            fields = []
             for field in obj_name.fieldnames:
                 fields.append(getattr(obj_name, field))
 
@@ -112,9 +128,8 @@ class EnergyPlusHelper:
 
         Examples
         ----------
-        >>> from EPinterface.EPHelper import EnergyPlusHelper
-        >>> ep = EnergyPlusHelper(idf_file="D:/F/uniopt/EP/singleZonePurchAir_template.idf",
-        >>>                         idd_file="D:/F/uniopt/EP/E+.idd",weather_file="D:/F/uniopt/EP/in.epw")
+        >>> ep = EnergyPlusHelper(idf_path="D:/F/uniopt/EP/singleZonePurchAir_template.idf",
+        >>>                         idd_path="D:/F/uniopt/EP/E+.idd",weather_path="D:/F/uniopt/EP/in.epw")
         >>> ep.set_field_val(obj_name=['BUILDING','MATERIAL'], fld_name=['North_Axis', 'Thickness'], val=[32.,0.02])
 
         """
@@ -123,4 +138,56 @@ class EnergyPlusHelper:
             # Loop to handle multiple objects of the same object
             for obj in objects:
                 setattr(obj, fld_name, val)
+
+    def set_output_path(self, output_path):
+        """
+
+        Parameters
+        ----------
+        output_path : str
+            the desired path of the output files
+
+        """
+        self.output_path = output_path
+
+    def get_output_path(self):
+        """ get the output path
+
+        Returns
+        -------
+        str
+
+        """
+        return self.output_path
+
+    def run_idf(self):
+        """ starts the simulations for the given idf parameters
+
+        """
+        # self.idf.saveas(self.run_filename)
+        #
+        # cmd = "energyplus "
+        # if self.output_path:
+        #     cmd += " -d " + self.output_path
+        # cmd += " " + self.run_filename
+        # os.system(cmd)
+        # self.idf.run(weather="C:/EnergyPlusV9-1-0/WeatherData/USA_"
+        self.idf.run(weather="/mnt/c/EnergyPlusV9-1-0/WeatherData/USA_"
+                             "CA_San.Francisco.Intl.AP.724940_TMY3.epw", output_directory=self.output_path, )
+
+    def get_results(self, variables):
+        """
+
+        Parameters
+        ----------
+        variables : list
+            list result variables wanted
+
+        Returns
+        -------
+        dict
+
+        """
+        PATH_TO_ESO = self.output_path + '/eplusout.eso'
+        dd, data = eso.read(PATH_TO_ESO)
 
